@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GDD Studio - Game Design Document Generator</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <i class="fas fa-gamepad"></i>
+                    <span>GDD Studio</span>
+                </div>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <span class="nav-section-title">DOCUMENT</span>
+                    <ul class="nav-list" id="documentSections">
+                        <!-- Dynamically populated -->
+                    </ul>
+                </div>
+                
+                <div class="nav-section">
+                    <span class="nav-section-title">TOOLS</span>
+                    <ul class="nav-list">
+                        <li class="nav-item" data-tool="chat">
+                            <i class="fas fa-comments"></i>
+                            <span>AI Chat</span>
+                        </li>
+                        <li class="nav-item" data-tool="diagrams">
+                            <i class="fas fa-project-diagram"></i>
+                            <span>Diagrams</span>
+                        </li>
+                        <li class="nav-item" data-tool="export">
+                            <i class="fas fa-file-export"></i>
+                            <span>Export</span>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="ollama-status" id="ollamaStatus">
+                    <span class="status-dot"></span>
+                    <span>Connecting to Ollama...</span>
+                </div>
+                <select id="modelSelect" class="model-select">
+                    <option value="">Select Model...</option>
+                </select>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Top Bar -->
+            <header class="top-bar">
+                <div class="breadcrumb" id="breadcrumb">
+                    <span>Home</span>
+                </div>
+                <div class="top-bar-actions">
+                    <button class="btn btn-ghost" id="themeToggle">
+                        <i class="fas fa-moon"></i>
+                    </button>
+                    <button class="btn btn-primary" id="newProjectBtn">
+                        <i class="fas fa-plus"></i>
+                        New Project
+                    </button>
+                </div>
+            </header>
+
+            <!-- Content Area -->
+            <div class="content-wrapper">
+                <!-- Welcome/Overview Panel -->
+                <div class="panel welcome-panel" id="welcomePanel">
+                    <div class="welcome-content">
+                        <h1>🎮 Welcome to GDD Studio</h1>
+                        <p>AI-powered Game Design Document creation tool</p>
+                        
+                        <div class="quick-start">
+                            <h3>Quick Start</h3>
+                            <div class="quick-start-grid">
+                                <div class="quick-start-card" onclick="startNewProject()">
+                                    <i class="fas fa-rocket"></i>
+                                    <h4>New Project</h4>
+                                    <p>Create a GDD from scratch</p>
+                                </div>
+                                <div class="quick-start-card" onclick="openChat()">
+                                    <i class="fas fa-brain"></i>
+                                    <h4>AI Brainstorm</h4>
+                                    <p>Develop your ideas</p>
+                                </div>
+                                <div class="quick-start-card" onclick="loadTemplate()">
+                                    <i class="fas fa-file-alt"></i>
+                                    <h4>Start from Template</h4>
+                                    <p>Use a ready-made template</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GDD Editor Panel -->
+                <div class="panel gdd-panel hidden" id="gddPanel">
+                    <div class="gdd-header">
+                        <input type="text" class="gdd-title-input" id="gddTitle" placeholder="Game Title...">
+                        <div class="gdd-meta">
+                            <span class="meta-item"><i class="fas fa-calendar"></i> <span id="lastUpdated">-</span></span>
+                            <span class="meta-item"><i class="fas fa-file-word"></i> <span id="wordCount">0</span> words</span>
+                        </div>
+                    </div>
+                    
+                    <div class="gdd-sections" id="gddSections">
+                        <!-- GDD sections will be rendered here -->
+                    </div>
+                </div>
+
+                <!-- Chat Panel -->
+                <div class="panel chat-panel hidden" id="chatPanel">
+                    <div class="chat-header">
+                        <h2><i class="fas fa-robot"></i> AI Assistant</h2>
+                        <div class="chat-actions">
+                            <button class="btn btn-ghost btn-sm" onclick="clearChat()">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="chat-message assistant">
+                            <div class="message-avatar"><i class="fas fa-robot"></i></div>
+                            <div class="message-content">
+                                <p>Hello! I'm the GDD Studio AI assistant. I can help you create your game design document.</p>
+                                <p>Tell me about your game idea and I'll automatically generate all the necessary sections:</p>
+                                <ul>
+                                    <li>📝 Game Overview & Concept</li>
+                                    <li>🎮 Gameplay Mechanics</li>
+                                    <li>📖 Story & Characters</li>
+                                    <li>🗺️ World & Level Design</li>
+                                    <li>🎨 Art Style</li>
+                                    <li>🔊 Sound Design</li>
+                                    <li>⚙️ Technical Requirements</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="chat-input-area">
+                        <div class="chat-suggestions" id="chatSuggestions">
+                            <button class="suggestion-chip" onclick="useSuggestion('I want to make a roguelike dungeon crawler game')">
+                                🗡️ Roguelike Dungeon
+                            </button>
+                            <button class="suggestion-chip" onclick="useSuggestion('A casual puzzle game for mobile')">
+                                🧩 Casual Puzzle
+                            </button>
+                            <button class="suggestion-chip" onclick="useSuggestion('An open world survival game')">
+                                🏕️ Survival Game
+                            </button>
+                        </div>
+                        <div class="chat-input-wrapper">
+                            <textarea id="chatInput" placeholder="Describe your game idea..." rows="1"></textarea>
+                            <button class="btn btn-primary send-btn" id="sendBtn" onclick="sendMessage()">
+                                <i class="fas fa-paper-plane"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Diagram Panel -->
+                <div class="panel diagram-panel hidden" id="diagramPanel">
+                    <div class="diagram-header">
+                        <h2><i class="fas fa-project-diagram"></i> Diagrams</h2>
+                        <div class="diagram-actions">
+                            <select id="diagramType" class="diagram-select">
+                                <option value="gameloop">Game Loop</option>
+                                <option value="mechanics">Mechanic Relations</option>
+                                <option value="progression">Progression System</option>
+                                <option value="ui-flow">UI Flow</option>
+                                <option value="custom">Custom Diagram</option>
+                            </select>
+                            <button class="btn btn-primary" onclick="generateDiagram()">
+                                <i class="fas fa-magic"></i> Generate
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="diagram-content">
+                        <div class="diagram-preview" id="diagramPreview">
+                            <div class="mermaid" id="mermaidDiagram">
+                                graph TD
+                                    A[Start] --> B{Is it working?}
+                                    B -->|Yes| C[Great!]
+                                    B -->|No| D[Debug]
+                                    D --> A
+                            </div>
+                        </div>
+                        <div class="diagram-code">
+                            <label>Diagram Code (Mermaid)</label>
+                            <textarea id="diagramCode" placeholder="Write your Mermaid diagram code here...">graph TD
+    A[Start] --> B{Is it working?}
+    B -->|Yes| C[Great!]
+    B -->|No| D[Debug]
+    D --> A</textarea>
+                            <button class="btn btn-ghost" onclick="updateDiagram()">
+                                <i class="fas fa-sync"></i> Update
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Export Panel -->
+                <div class="panel export-panel hidden" id="exportPanel">
+                    <div class="export-header">
+                        <h2><i class="fas fa-file-export"></i> Export</h2>
+                    </div>
+                    
+                    <div class="export-options">
+                        <div class="export-card" onclick="exportAs('markdown')">
+                            <i class="fab fa-markdown"></i>
+                            <h4>Markdown</h4>
+                            <p>Obsidian, Notion compatible</p>
+                        </div>
+                        <div class="export-card" onclick="exportAs('html')">
+                            <i class="fas fa-code"></i>
+                            <h4>HTML</h4>
+                            <p>Web preview</p>
+                        </div>
+                        <div class="export-card" onclick="exportAs('pdf')">
+                            <i class="fas fa-file-pdf"></i>
+                            <h4>PDF</h4>
+                            <p>Print ready</p>
+                        </div>
+                        <div class="export-card" onclick="exportAs('json')">
+                            <i class="fas fa-database"></i>
+                            <h4>JSON</h4>
+                            <p>Backup & migration</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Side Panel (Context/AI Suggestions) -->
+        <aside class="side-panel" id="sidePanel">
+            <div class="side-panel-header">
+                <h3>AI Suggestions</h3>
+                <button class="btn btn-ghost btn-sm" onclick="toggleSidePanel()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="side-panel-content" id="sidePanelContent">
+                <div class="suggestion-card">
+                    <h4>💡 Tip</h4>
+                    <p>Select a section from the left menu and ask AI to generate content for it.</p>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- New Project Modal -->
+    <div class="modal hidden" id="newProjectModal">
+        <div class="modal-backdrop" onclick="closeModal('newProjectModal')"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Create New Project</h2>
+                <button class="btn btn-ghost" onclick="closeModal('newProjectModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Game Title</label>
+                    <input type="text" id="newProjectName" placeholder="Your game's name...">
+                </div>
+                <div class="form-group">
+                    <label>Genre</label>
+                    <select id="newProjectGenre">
+                        <option value="action">Action</option>
+                        <option value="adventure">Adventure</option>
+                        <option value="rpg">RPG</option>
+                        <option value="puzzle">Puzzle</option>
+                        <option value="simulation">Simulation</option>
+                        <option value="strategy">Strategy</option>
+                        <option value="casual">Casual</option>
+                        <option value="horror">Horror</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Short Description</label>
+                    <textarea id="newProjectDesc" rows="3" placeholder="Briefly describe your game..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Platforms</label>
+                    <div class="checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" value="pc" checked> PC
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" value="mobile"> Mobile
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" value="console"> Console
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" value="web"> Web
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" onclick="closeModal('newProjectModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="createProject()">
+                    <i class="fas fa-plus"></i> Create
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
