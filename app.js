@@ -6,7 +6,7 @@
 // ===== Configuration =====
 const CONFIG = {
     ollamaUrl: 'http://localhost:11434',
-    defaultModel: 'llama3.2',
+    defaultModel: 'gpt-oss:20b',
     maxTokens: 4096,
     temperature: 0.7
 };
@@ -95,7 +95,9 @@ let state = {
     chatHistory: [],
     gddData: {},
     isDarkTheme: true,
-    generatingSection: null // track which section is being generated
+    generatingSection: null, // track which section is being generated
+    diagramHistory: [], // saved diagrams
+    sectionPrompts: {} // custom user prompts per section
 };
 
 // ===== Initialize Application =====
@@ -180,7 +182,7 @@ async function generateWithOllama(prompt, systemPrompt = '') {
 
     const fullSystemPrompt = `You are a professional game designer and an expert in preparing Game Design Documents (GDD).
 Respond in English. Create detailed, structured, and professional documents.
-Write in Markdown format. Use headings, lists, and emphasis.
+Write in Markdown format. Use headings, lists, and emphasis. Do not use emojis.
 ${systemPrompt}`;
 
     try {
@@ -305,6 +307,39 @@ function setupEventListeners() {
         document.getElementById('newProjectModal').classList.remove('hidden');
     });
 
+    // Genre chip multi-select
+    document.querySelectorAll('.genre-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            chip.classList.toggle('selected');
+        });
+    });
+
+    // Custom genre input
+    const genreInput = document.getElementById('genreCustomInput');
+    if (genreInput) {
+        genreInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const value = genreInput.value.trim();
+                if (!value) return;
+                // Avoid duplicates
+                const existing = document.querySelectorAll('.genre-tag');
+                for (const tag of existing) {
+                    if (tag.dataset.genre.toLowerCase() === value.toLowerCase()) return;
+                }
+                // Check if it matches a chip
+                const matchingChip = document.querySelector(`.genre-chip[data-genre="${value}" i]`);
+                if (matchingChip) {
+                    matchingChip.classList.add('selected');
+                    genreInput.value = '';
+                    return;
+                }
+                addCustomGenreTag(value);
+                genreInput.value = '';
+            }
+        });
+    }
+
     const chatInput = document.getElementById('chatInput');
     chatInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -324,6 +359,30 @@ function setupEventListeners() {
             navigateTo(tool);
         });
     });
+
+    // Import drag and drop
+    const dropZone = document.getElementById('importDropZone');
+    if (dropZone) {
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            const file = e.dataTransfer.files[0];
+            const validExts = ['.json', '.md', '.html', '.htm'];
+            const hasValidExt = validExts.some(ext => file?.name.toLowerCase().endsWith(ext));
+            if (file && hasValidExt) {
+                importProjectFile(file);
+            } else {
+                showToast('Please drop a .json, .md, or .html file', 'error');
+            }
+        });
+    }
 }
 
 function navigateTo(view) {
@@ -341,6 +400,8 @@ function navigateTo(view) {
         case 'diagrams':
             document.getElementById('diagramPanel').classList.remove('hidden');
             updateDiagram();
+            initDiagramPanZoom();
+            renderDiagramHistory();
             break;
         case 'export':
             document.getElementById('exportPanel').classList.remove('hidden');
@@ -397,12 +458,32 @@ function startNewProject() {
     document.getElementById('newProjectModal').classList.remove('hidden');
 }
 
+function addCustomGenreTag(value) {
+    const container = document.getElementById('genreSelectedTags');
+    const tag = document.createElement('span');
+    tag.className = 'genre-tag';
+    tag.dataset.genre = value;
+    tag.innerHTML = `${value} <i class="fas fa-times" onclick="removeCustomGenreTag(this)"></i>`;
+    container.appendChild(tag);
+}
+
+function removeCustomGenreTag(icon) {
+    icon.parentElement.remove();
+}
+
 function createProject() {
     const name = document.getElementById('newProjectName').value.trim();
-    const genre = document.getElementById('newProjectGenre').value;
     const desc = document.getElementById('newProjectDesc').value.trim();
     const platforms = Array.from(document.querySelectorAll('.checkbox-group input:checked'))
         .map(cb => cb.value);
+
+    // Collect genres from selected chips + custom tags
+    const selectedGenres = Array.from(document.querySelectorAll('.genre-chip.selected'))
+        .map(chip => chip.dataset.genre);
+    const customTags = Array.from(document.querySelectorAll('.genre-tag'))
+        .map(tag => tag.dataset.genre);
+    const allGenres = [...new Set([...selectedGenres, ...customTags])];
+    const genre = allGenres.length > 0 ? allGenres.join(', ') : 'Unspecified';
 
     if (!name) {
         showToast('Project name is required', 'error');
@@ -432,8 +513,12 @@ function createProject() {
 
     showToast('Project created!', 'success');
 
+    // Reset form
     document.getElementById('newProjectName').value = '';
     document.getElementById('newProjectDesc').value = '';
+    document.querySelectorAll('.genre-chip.selected').forEach(c => c.classList.remove('selected'));
+    document.getElementById('genreSelectedTags').innerHTML = '';
+    document.getElementById('genreCustomInput').value = '';
 }
 
 function renderGDDContent() {
@@ -458,6 +543,7 @@ function renderGDDContent() {
         const sectionData = state.gddData[section.id] || {};
         const hasContent = sectionData.content && sectionData.content.trim();
         const isGenerating = state.generatingSection === section.id;
+        const customPrompt = state.sectionPrompts[section.id] || '';
 
         const div = document.createElement('div');
         div.className = 'gdd-section';
@@ -470,6 +556,9 @@ function renderGDDContent() {
                     <h3>${section.title}</h3>
                 </div>
                 <div class="gdd-section-actions">
+                    <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); togglePromptInput('${section.id}')" title="Custom Prompt">
+                        <i class="fas fa-comment-dots"></i>
+                    </button>
                     <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); generateSection('${section.id}')" title="Generate with AI" ${isGenerating ? 'disabled' : ''}>
                         <i class="fas ${isGenerating ? 'fa-spinner fa-spin' : 'fa-magic'}"></i>
                     </button>
@@ -478,11 +567,27 @@ function renderGDDContent() {
                     </button>
                 </div>
             </div>
+            <div class="section-prompt-area hidden" id="prompt-area-${section.id}">
+                <div class="prompt-input-wrapper">
+                    <i class="fas fa-lightbulb prompt-icon"></i>
+                    <textarea class="section-prompt-input" id="prompt-${section.id}" 
+                        placeholder="Add custom instructions for AI... (e.g. 'Include a skill tree system', 'Focus on stealth mechanics', 'Add multiplayer features')" 
+                        rows="2">${customPrompt}</textarea>
+                </div>
+                <div class="prompt-actions">
+                    <button class="btn btn-primary btn-sm" onclick="generateSectionWithPrompt('${section.id}')">
+                        <i class="fas fa-magic"></i> Generate with Custom Prompt
+                    </button>
+                    <button class="btn btn-ghost btn-sm" onclick="clearSectionPrompt('${section.id}')">
+                        <i class="fas fa-times"></i> Clear
+                    </button>
+                </div>
+            </div>
             <div class="gdd-section-content" id="content-${section.id}">
                 ${hasContent ? parseMarkdown(sectionData.content) : `
-                    <div class="section-placeholder" onclick="generateSection('${section.id}')">
+                    <div class="section-placeholder" onclick="togglePromptInput('${section.id}')">
                         <i class="fas fa-robot"></i>
-                        <p>Generate content with AI</p>
+                        <p>Click to add custom instructions or generate with AI</p>
                     </div>
                 `}
             </div>
@@ -502,11 +607,17 @@ async function generateSection(sectionId) {
     const contentEl = document.getElementById(`content-${sectionId}`);
     if (!contentEl) return;
 
+    const customPrompt = state.sectionPrompts[sectionId] || '';
+    const existingContent = state.gddData[sectionId]?.content?.trim() || '';
+
+    // Determine mode: update existing vs generate fresh
+    const isUpdate = existingContent && customPrompt;
+
     // Show inline loading indicator inside the section
     contentEl.innerHTML = `
         <div class="inline-loading">
             <div class="inline-spinner"></div>
-            <span>AI is writing the <strong>${section.title}</strong> section...</span>
+            <span>AI is ${isUpdate ? 'updating' : 'writing'} the <strong>${section.title}</strong> section...</span>
         </div>
     `;
 
@@ -518,28 +629,67 @@ async function generateSection(sectionId) {
         magicBtn.closest('button').disabled = true;
     }
 
+    const today = new Date();
+    const todayStr = today.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
     const context = `
 Game Name: ${state.currentProject.name}
 Genre: ${state.currentProject.genre}
 Platforms: ${state.currentProject.platforms.join(', ')}
 Description: ${state.currentProject.description}
-
-Existing GDD information:
-${Object.entries(state.gddData).map(([key, val]) => {
-        const sec = GDD_SECTIONS.find(s => s.id === key);
-        return sec && val.content ? `\n### ${sec.title}\n${val.content.substring(0, 500)}...` : '';
-    }).join('')}
+Project Created: ${new Date(state.currentProject.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+Today's Date: ${todayStr}
 `;
 
-    const prompt = `
+    let prompt;
+
+    if (isUpdate) {
+        // MODE: Update/modify existing content based on custom prompt
+        prompt = `
 ${context}
 
-Based on the information above, create the "${section.title}" section of the GDD in a detailed and professional manner.
+Here is the CURRENT content of the "${section.title}" section:
+
+---
+${existingContent}
+---
+
+The user wants to MODIFY/UPDATE this section with the following instructions:
+${customPrompt}
+
+IMPORTANT RULES:
+- Keep the existing content structure and information intact
+- Apply ONLY the changes the user requested
+- Do NOT remove or rewrite parts that the user didn't mention
+- Add new content where appropriate based on the user's instructions
+- Maintain the same writing style and Markdown formatting
+- Return the COMPLETE updated section (not just the changes)
+${sectionId === 'timeline' ? `- Today's date is ${todayStr}. All dates must be realistic and in the future starting from today.` : ''}
+
+Write in Markdown format with headings and subheadings.
+`;
+    } else {
+        // MODE: Generate from scratch — exclude THIS section's old content entirely
+        const otherSections = Object.entries(state.gddData).map(([key, val]) => {
+            const sec = GDD_SECTIONS.find(s => s.id === key);
+            return sec && val.content && key !== sectionId ? `\n### ${sec.title}\n${val.content.substring(0, 500)}` : '';
+        }).filter(Boolean).join('');
+
+        prompt = `
+${context}
+
+${otherSections ? `Other GDD sections for reference:\n${otherSections}` : ''}
+
+Create the "${section.title}" section of the GDD from scratch. This is a FRESH generation — ignore any previous version of this section.
 
 This section should include: ${section.prompt}
+${sectionId === 'timeline' ? `\nIMPORTANT: Today's date is ${todayStr}. All milestone and phase dates MUST be realistic future dates starting from today. Do NOT use past dates or placeholder years.` : ''}
+
+${customPrompt ? `User's custom instructions:\n${customPrompt}\n` : ''}
 
 Write in an organized way using Markdown format with headings and subheadings.
 `;
+    }
 
     const response = await streamGenerateWithOllama(prompt, '', (chunk, fullText) => {
         contentEl.innerHTML = parseMarkdown(fullText);
@@ -553,7 +703,7 @@ Write in an organized way using Markdown format with headings and subheadings.
         saveState();
         renderDocumentSections();
         updateWordCount();
-        showToast(`${section.title} section generated!`, 'success');
+        showToast(`${section.title} section ${isUpdate ? 'updated' : 'generated'}!`, 'success');
     } else {
         // Restore placeholder on failure
         contentEl.innerHTML = `
@@ -644,23 +794,66 @@ async function sendMessage() {
 
     const context = buildChatContext();
 
+    // Smart context: detect which section(s) the user is asking about
+    const relevantSectionIds = detectRelevantSections(message);
+
+    // Build targeted GDD context
+    let gddContext = '';
+    if (state.currentProject) {
+        const chatTodayStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+        gddContext += `\n--- PROJECT ---\n`;
+        gddContext += `Name: ${state.currentProject.name} | Genre: ${state.currentProject.genre} | Platforms: ${state.currentProject.platforms.join(', ')}\n`;
+        gddContext += `Today's Date: ${chatTodayStr}\n`;
+        if (state.currentProject.description) {
+            gddContext += `Description: ${state.currentProject.description}\n`;
+        }
+
+        const filledSections = GDD_SECTIONS.filter(s => state.gddData[s.id]?.content?.trim());
+
+        if (filledSections.length > 0) {
+            // Separate relevant vs other sections
+            const relevant = filledSections.filter(s => relevantSectionIds.includes(s.id));
+            const others = filledSections.filter(s => !relevantSectionIds.includes(s.id));
+
+            // Send relevant sections in FULL
+            if (relevant.length > 0) {
+                gddContext += `\n--- RELEVANT SECTIONS (full content) ---\n`;
+                relevant.forEach(s => {
+                    const content = state.gddData[s.id].content.trim();
+                    gddContext += `\n### ${s.title}\n${content}\n`;
+                });
+            }
+
+            // List other sections as brief summaries
+            if (others.length > 0) {
+                gddContext += `\n--- OTHER SECTIONS (summaries) ---\n`;
+                others.forEach(s => {
+                    const content = state.gddData[s.id].content.trim();
+                    const firstLine = content.split('\n').find(l => l.trim() && !l.trim().startsWith('#')) || content.substring(0, 80);
+                    gddContext += `- ${s.title}: ${firstLine.substring(0, 100).trim()}...\n`;
+                });
+            }
+        }
+
+        // List empty sections
+        const emptySections = GDD_SECTIONS.filter(s => !state.gddData[s.id]?.content?.trim());
+        if (emptySections.length > 0) {
+            gddContext += `\nEmpty sections (not yet written): ${emptySections.map(s => s.title).join(', ')}\n`;
+        }
+    }
+
     const systemPrompt = `
-You are the GDD Studio AI assistant. You help users create Game Design Documents.
+You are the GDD Studio AI assistant. You help users create and refine Game Design Documents.
 
-Your tasks:
-1. Develop and refine game ideas
-2. Generate detailed content for GDD sections
-3. Provide suggestions about game mechanics, story, and characters
-4. Generate Mermaid code for diagrams
-5. Give professional and structured responses
+Your capabilities:
+1. Answer questions about the current GDD document using the provided content
+2. Suggest improvements, find gaps or inconsistencies
+3. Generate new content for empty or incomplete sections
+4. Provide professional game design feedback
+5. Generate Mermaid diagram code when requested
 
-When a user describes a game idea, suggest automatically creating:
-- Game overview and concept
-- Core gameplay loop
-- Main mechanics
-- Potential story elements
-
-Current Project: ${state.currentProject ? state.currentProject.name : 'No project yet'}
+IMPORTANT: The relevant section(s) for this question are provided in FULL below. Use this actual content — do NOT invent details that contradict the document. Other sections are shown as brief summaries for context.
+${gddContext}
 `;
 
     const prompt = `
@@ -668,7 +861,7 @@ ${context}
 
 User: ${message}
 
-Give a detailed and helpful response. Use Markdown format where appropriate.
+Respond based on the actual GDD document content provided. Be specific and reference the document when relevant. Use Markdown format.
 `;
 
     const messageEl = document.getElementById(thinkingId);
@@ -738,41 +931,187 @@ function buildChatContext() {
     return recentMessages.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n\n');
 }
 
+// Detect which GDD section(s) the user's message is about
+function detectRelevantSections(message) {
+    const lower = message.toLowerCase();
+
+    // Keyword map: section id -> keywords (EN + TR)
+    const sectionKeywords = {
+        overview: ['overview', 'genel bakış', 'konsept', 'concept', 'vision', 'vizyon', 'game idea', 'oyun fikri', 'target audience', 'hedef kitle', 'unique selling', 'genre', 'tür'],
+        gameplay: ['gameplay', 'mechanic', 'mekanik', 'kontrol', 'control', 'combat', 'savaş', 'dövüş', 'game loop', 'oynanış', 'system', 'sistem', 'ability', 'yetenek', 'skill', 'beceri', 'movement', 'hareket'],
+        story: ['story', 'hikaye', 'narrative', 'anlatı', 'plot', 'olay örgüsü', 'lore', 'backstory', 'quest', 'görev', 'dialog', 'diyalog', 'theme', 'tema', 'ending', 'son', 'senaryo', 'scenario'],
+        characters: ['character', 'karakter', 'protagonist', 'antagonist', 'düşman', 'enemy', 'npc', 'hero', 'kahraman', 'villain', 'boss', 'companion', 'partner', 'ally', 'müttefik'],
+        world: ['world', 'dünya', 'level', 'seviye', 'bölüm', 'map', 'harita', 'environment', 'ortam', 'çevre', 'location', 'lokasyon', 'mekan', 'biome', 'terrain', 'arazi', 'zone'],
+        art: ['art', 'sanat', 'visual', 'görsel', 'style', 'stil', 'ui', 'ux', 'design', 'tasarım', 'color', 'renk', 'palette', 'palet', 'aesthetic', 'estetik', 'arayüz', 'interface', 'animation', 'animasyon'],
+        audio: ['audio', 'ses', 'sound', 'müzik', 'music', 'sfx', 'effect', 'voice', 'seslendirme', 'ambient', 'ortam sesi', 'soundtrack'],
+        technical: ['technical', 'teknik', 'engine', 'motor', 'platform', 'requirement', 'gereksinim', 'performance', 'performans', 'optimization', 'network', 'ağ', 'multiplayer', 'server', 'sunucu', 'spec', 'hardware', 'donanım'],
+        monetization: ['monetiz', 'gelir', 'revenue', 'price', 'fiyat', 'dlc', 'microtransaction', 'in-app', 'ücret', 'business', 'iş modeli', 'free-to-play', 'premium', 'subscription', 'abonelik', 'store', 'mağaza'],
+        timeline: ['timeline', 'zaman', 'schedule', 'takvim', 'milestone', 'roadmap', 'yol haritası', 'deadline', 'sprint', 'phase', 'aşama', 'release', 'yayın', 'launch', 'çıkış']
+    };
+
+    // Check for broad/general questions
+    const broadKeywords = ['tüm', 'bütün', 'hepsi', 'genel', 'dokuman', 'document', 'entire', 'all section', 'whole', 'everything', 'review', 'incele', 'özet', 'summary', 'eksik', 'missing', 'gap'];
+    const isBroad = broadKeywords.some(kw => lower.includes(kw));
+
+    if (isBroad) {
+        // Return all filled sections for broad questions
+        return GDD_SECTIONS
+            .filter(s => state.gddData[s.id]?.content?.trim())
+            .map(s => s.id);
+    }
+
+    // Score each section by keyword matches
+    const scores = {};
+    for (const [sectionId, keywords] of Object.entries(sectionKeywords)) {
+        let score = 0;
+        for (const kw of keywords) {
+            if (lower.includes(kw)) score++;
+        }
+        if (score > 0) scores[sectionId] = score;
+    }
+
+    // Return sections with matches, sorted by relevance
+    const matched = Object.entries(scores)
+        .sort((a, b) => b[1] - a[1])
+        .map(([id]) => id);
+
+    // If nothing matched, return empty (AI will work with project info only)
+    return matched;
+}
+// ===== Custom Prompt Functions =====
+function togglePromptInput(sectionId) {
+    const promptArea = document.getElementById(`prompt-area-${sectionId}`);
+    if (promptArea) {
+        promptArea.classList.toggle('hidden');
+        if (!promptArea.classList.contains('hidden')) {
+            const textarea = document.getElementById(`prompt-${sectionId}`);
+            if (textarea) textarea.focus();
+        }
+    }
+}
+
+function generateSectionWithPrompt(sectionId) {
+    const textarea = document.getElementById(`prompt-${sectionId}`);
+    if (textarea) {
+        state.sectionPrompts[sectionId] = textarea.value;
+        saveState();
+    }
+    generateSection(sectionId);
+}
+
+function clearSectionPrompt(sectionId) {
+    const textarea = document.getElementById(`prompt-${sectionId}`);
+    if (textarea) textarea.value = '';
+    state.sectionPrompts[sectionId] = '';
+    saveState();
+    showToast('Custom prompt cleared', 'info');
+}
+
 // ===== Diagram Functions =====
+const DIAGRAM_TYPES = {
+    gameloop: { label: 'Game Loop', icon: 'fa-sync-alt', desc: 'Core gameplay loop flow' },
+    mechanics: { label: 'Mechanic Relations', icon: 'fa-cogs', desc: 'How mechanics interact' },
+    progression: { label: 'Progression System', icon: 'fa-chart-line', desc: 'Player progression path' },
+    'ui-flow': { label: 'UI Flow', icon: 'fa-mobile-alt', desc: 'Screen navigation flow' },
+    'class-diagram': { label: 'Class Diagram', icon: 'fa-sitemap', desc: 'OOP class structure' },
+    'state-diagram': { label: 'State Diagram', icon: 'fa-exchange-alt', desc: 'Game state transitions' },
+    'er-diagram': { label: 'ER Diagram', icon: 'fa-database', desc: 'Data entity relationships' },
+    'sequence': { label: 'Sequence Diagram', icon: 'fa-list-ol', desc: 'Interaction sequences' },
+    'mindmap': { label: 'Mind Map', icon: 'fa-brain', desc: 'Concept brainstorming map' },
+    'timeline': { label: 'Timeline', icon: 'fa-calendar-alt', desc: 'Development timeline' },
+    custom: { label: 'Custom', icon: 'fa-pencil-alt', desc: 'Your own diagram type' }
+};
+
 async function generateDiagram() {
     const type = document.getElementById('diagramType').value;
+    const customDiagramPrompt = document.getElementById('diagramCustomPrompt').value.trim();
+    const existingCode = document.getElementById('diagramCode').value.trim();
+
     if (!state.currentProject) {
         showToast('Create a project first', 'info');
         return;
     }
 
-    // Show inline loading in the diagram preview area
+    // Determine if we're modifying existing or generating new
+    const isModifying = existingCode && customDiagramPrompt;
+
+    // Show inline loading
     const previewEl = document.getElementById('diagramPreview');
     previewEl.innerHTML = `
         <div class="inline-loading">
             <div class="inline-spinner"></div>
-            <span>Generating diagram...</span>
+            <span>${isModifying ? 'Updating' : 'Generating'} ${DIAGRAM_TYPES[type]?.label || ''} diagram...</span>
         </div>
     `;
 
+    const generateBtn = document.getElementById('generateDiagramBtn');
+    if (generateBtn) {
+        generateBtn.disabled = true;
+        generateBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${isModifying ? 'Updating...' : 'Generating...'}`;
+    }
+
     const diagramPrompts = {
-        gameloop: `Create a Mermaid flowchart diagram showing the core game loop for ${state.currentProject.name}.`,
-        mechanics: `Create a Mermaid diagram showing how the main mechanics relate to each other in ${state.currentProject.name}.`,
-        progression: `Create a Mermaid diagram showing the player progression system in ${state.currentProject.name}.`,
-        'ui-flow': `Create a Mermaid diagram showing the UI flow (menus, screens, transitions) of ${state.currentProject.name}.`,
+        gameloop: `Create a Mermaid flowchart diagram showing the core game loop for ${state.currentProject.name}. Show the main cycle: Start -> Core Actions -> Feedback -> Reward -> Decision -> Repeat.`,
+        mechanics: `Create a Mermaid diagram showing how all the main mechanics relate to and interact with each other in ${state.currentProject.name}. Use a graph TD or LR layout.`,
+        progression: `Create a Mermaid diagram showing the complete player progression system in ${state.currentProject.name}. Include levels, unlocks, skill trees, and milestones.`,
+        'ui-flow': `Create a Mermaid flowchart diagram showing the complete UI flow (all menus, screens, and transitions) of ${state.currentProject.name}.`,
+        'class-diagram': `Create a Mermaid classDiagram showing the main class structure for ${state.currentProject.name}. Include key classes like Player, Enemy, GameManager, Item, etc. with their properties and methods.`,
+        'state-diagram': `Create a Mermaid stateDiagram-v2 showing the main game states and transitions for ${state.currentProject.name}. Include states like MainMenu, Loading, Playing, Paused, GameOver, etc.`,
+        'er-diagram': `Create a Mermaid erDiagram showing the data entity relationships for ${state.currentProject.name}. Include entities like Player, Inventory, Item, Quest, NPC, etc.`,
+        'sequence': `Create a Mermaid sequence diagram showing a key interaction sequence in ${state.currentProject.name}. For example combat flow or quest interaction.`,
+        'mindmap': `Create a Mermaid mindmap diagram brainstorming the key concepts and features of ${state.currentProject.name}.`,
+        'timeline': `Create a Mermaid timeline diagram showing the development phases and milestones for ${state.currentProject.name}.`,
         custom: `Create an appropriate Mermaid diagram for ${state.currentProject.name}.`
     };
 
-    const prompt = `
+    const gddContext = Object.entries(state.gddData).map(([key, val]) => {
+        const sec = GDD_SECTIONS.find(s => s.id === key);
+        return sec && val.content ? `${sec.title}: ${val.content.substring(0, 300)}` : '';
+    }).filter(Boolean).join('\n');
+
+    let prompt;
+
+    if (isModifying) {
+        // MODE: Modify/extend existing diagram
+        prompt = `
+You have an existing Mermaid diagram for the game "${state.currentProject.name}":
+
+\`\`\`mermaid
+${existingCode}
+\`\`\`
+
+The user wants to MODIFY or EXTEND this diagram with the following instructions:
+${customDiagramPrompt}
+
+IMPORTANT RULES:
+- Keep ALL existing nodes, connections, and structure from the current diagram
+- ADD or MODIFY only what the user requested
+- Do NOT remove existing elements unless the user explicitly asks to remove something
+- Maintain the same diagram type and style
+- Return the COMPLETE updated Mermaid code (not just the changes)
+
+Return ONLY the updated Mermaid code, no explanations. Do not use code block markers (backticks).
+Write valid Mermaid syntax that will render correctly.
+`;
+    } else {
+        // MODE: Generate new diagram from scratch
+        prompt = `
 ${diagramPrompts[type]}
 
 Game Information:
+- Name: ${state.currentProject.name}
 - Genre: ${state.currentProject.genre}
+- Platforms: ${state.currentProject.platforms.join(', ')}
 - Description: ${state.currentProject.description}
 
+${gddContext ? `GDD Context:\n${gddContext}` : ''}
+
+${customDiagramPrompt ? `IMPORTANT - User's custom instructions:\n${customDiagramPrompt}\n\nIncorporate the user's specific requests into the diagram.` : ''}
+
 Return ONLY the Mermaid code, no other explanation. Do not use code block markers (backticks).
-Write valid Mermaid syntax that will render correctly.
+Write valid Mermaid syntax that will render correctly. Keep the diagram readable and not too complex.
 `;
+    }
 
     const response = await generateWithOllama(prompt);
 
@@ -784,8 +1123,14 @@ Write valid Mermaid syntax that will render correctly.
 
         document.getElementById('diagramCode').value = code;
         updateDiagram();
+        showToast(`${DIAGRAM_TYPES[type]?.label || 'Custom'} diagram ${isModifying ? 'updated' : 'generated'}!`, 'success');
     } else {
-        previewEl.innerHTML = '<p style="color: var(--accent-danger); text-align: center;">Failed to generate diagram.</p>';
+        previewEl.innerHTML = '<p style="color: var(--accent-danger); text-align: center;">Failed to generate diagram. Check your Ollama connection.</p>';
+    }
+
+    if (generateBtn) {
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = '<i class="fas fa-magic"></i> Generate';
     }
 }
 
@@ -793,7 +1138,8 @@ function updateDiagram() {
     const code = document.getElementById('diagramCode').value;
     const container = document.getElementById('diagramPreview');
 
-    container.innerHTML = '<div class="mermaid"></div>';
+    // Create inner wrapper for pan/zoom transforms
+    container.innerHTML = '<div class="diagram-preview-inner"><div class="mermaid"></div></div>';
     const mermaidDiv = container.querySelector('.mermaid');
     mermaidDiv.textContent = code;
 
@@ -803,6 +1149,180 @@ function updateDiagram() {
         console.error('Mermaid error:', error);
         container.innerHTML = `<p style="color: var(--accent-danger);">Diagram error: ${error.message}</p>`;
     }
+
+    // Reset pan/zoom
+    diagramTransform = { x: 0, y: 0, scale: 1 };
+    applyDiagramTransform();
+}
+
+// ---- Diagram Pan & Zoom State ----
+let diagramTransform = { x: 0, y: 0, scale: 1 };
+let diagramDrag = { active: false, startX: 0, startY: 0, startTx: 0, startTy: 0 };
+
+function applyDiagramTransform() {
+    const inner = document.querySelector('#diagramPreview .diagram-preview-inner');
+    if (inner) {
+        inner.style.transform = `translate(${diagramTransform.x}px, ${diagramTransform.y}px) scale(${diagramTransform.scale})`;
+    }
+    const label = document.getElementById('diagramZoomLevel');
+    if (label) {
+        label.textContent = Math.round(diagramTransform.scale * 100) + '%';
+    }
+}
+
+function diagramZoom(action, mouseX, mouseY) {
+    const preview = document.getElementById('diagramPreview');
+    if (!preview) return;
+
+    const rect = preview.getBoundingClientRect();
+    // Default to center of preview if no mouse position given
+    const cx = mouseX !== undefined ? mouseX - rect.left : rect.width / 2;
+    const cy = mouseY !== undefined ? mouseY - rect.top : rect.height / 2;
+
+    const oldScale = diagramTransform.scale;
+    let newScale;
+
+    if (action === 'in') {
+        newScale = Math.min(oldScale * 1.2, 5);
+    } else if (action === 'out') {
+        newScale = Math.max(oldScale / 1.2, 0.1);
+    } else if (action === 'reset') {
+        diagramTransform = { x: 0, y: 0, scale: 1 };
+        applyDiagramTransform();
+        return;
+    } else {
+        return;
+    }
+
+    // Zoom toward mouse position:
+    // The point under the mouse should stay in the same screen position
+    const ratio = newScale / oldScale;
+    diagramTransform.x = cx - ratio * (cx - diagramTransform.x);
+    diagramTransform.y = cy - ratio * (cy - diagramTransform.y);
+    diagramTransform.scale = newScale;
+    applyDiagramTransform();
+}
+
+function initDiagramPanZoom() {
+    const preview = document.getElementById('diagramPreview');
+    if (!preview || preview.dataset.panZoomInit) return;
+    preview.dataset.panZoomInit = 'true';
+
+    // Wheel zoom (mouse-position based)
+    preview.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const action = e.deltaY < 0 ? 'in' : 'out';
+        diagramZoom(action, e.clientX, e.clientY);
+    }, { passive: false });
+
+    // Left-click drag to pan
+    preview.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return; // left click only
+        diagramDrag.active = true;
+        diagramDrag.startX = e.clientX;
+        diagramDrag.startY = e.clientY;
+        diagramDrag.startTx = diagramTransform.x;
+        diagramDrag.startTy = diagramTransform.y;
+        preview.classList.add('dragging');
+        e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (!diagramDrag.active) return;
+        diagramTransform.x = diagramDrag.startTx + (e.clientX - diagramDrag.startX);
+        diagramTransform.y = diagramDrag.startTy + (e.clientY - diagramDrag.startY);
+        applyDiagramTransform();
+    });
+
+    window.addEventListener('mouseup', () => {
+        if (diagramDrag.active) {
+            diagramDrag.active = false;
+            const preview = document.getElementById('diagramPreview');
+            if (preview) preview.classList.remove('dragging');
+        }
+    });
+}
+
+function saveDiagram() {
+    const code = document.getElementById('diagramCode').value.trim();
+    const type = document.getElementById('diagramType').value;
+    if (!code) {
+        showToast('No diagram to save', 'info');
+        return;
+    }
+
+    const diagram = {
+        id: Date.now(),
+        type: type,
+        label: DIAGRAM_TYPES[type]?.label || 'Custom',
+        code: code,
+        createdAt: new Date().toISOString()
+    };
+
+    state.diagramHistory.unshift(diagram);
+    if (state.diagramHistory.length > 20) state.diagramHistory.pop();
+    saveState();
+    renderDiagramHistory();
+    showToast('Diagram saved!', 'success');
+}
+
+function loadDiagram(id) {
+    const diagram = state.diagramHistory.find(d => d.id === id);
+    if (diagram) {
+        document.getElementById('diagramCode').value = diagram.code;
+        document.getElementById('diagramType').value = diagram.type;
+        updateDiagram();
+        showToast(`Loaded: ${diagram.label}`, 'info');
+    }
+}
+
+function deleteDiagram(id) {
+    state.diagramHistory = state.diagramHistory.filter(d => d.id !== id);
+    saveState();
+    renderDiagramHistory();
+    showToast('Diagram deleted', 'info');
+}
+
+function renderDiagramHistory() {
+    const container = document.getElementById('diagramHistoryList');
+    if (!container) return;
+
+    if (state.diagramHistory.length === 0) {
+        container.innerHTML = '<p class="diagram-history-empty"><i class="fas fa-folder-open"></i> No saved diagrams yet</p>';
+        return;
+    }
+
+    container.innerHTML = state.diagramHistory.map(d => `
+        <div class="diagram-history-item" onclick="loadDiagram(${d.id})">
+            <div class="diagram-history-info">
+                <i class="fas ${DIAGRAM_TYPES[d.type]?.icon || 'fa-project-diagram'}"></i>
+                <span>${d.label}</span>
+            </div>
+            <div class="diagram-history-actions">
+                <span class="diagram-history-date">${new Date(d.createdAt).toLocaleDateString()}</span>
+                <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); deleteDiagram(${d.id})" title="Delete">
+                    <i class="fas fa-trash-alt"></i>
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function exportDiagramSVG() {
+    const svgEl = document.querySelector('#diagramPreview svg');
+    if (!svgEl) {
+        showToast('No diagram to export', 'info');
+        return;
+    }
+    const svgData = new XMLSerializer().serializeToString(svgEl);
+    const blob = new Blob([svgData], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${state.currentProject?.name || 'diagram'}_${document.getElementById('diagramType').value}.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Diagram exported as SVG!', 'success');
 }
 
 // ===== Export Functions =====
@@ -828,7 +1348,15 @@ function exportAs(format) {
             mimeType = 'text/html';
             break;
         case 'json':
-            content = JSON.stringify({ project: state.currentProject, gdd: state.gddData }, null, 2);
+            content = JSON.stringify({
+                project: state.currentProject,
+                gdd: state.gddData,
+                sectionPrompts: state.sectionPrompts || {},
+                diagramHistory: state.diagramHistory || [],
+                chatHistory: state.chatHistory || [],
+                exportedAt: new Date().toISOString(),
+                version: '1.1'
+            }, null, 2);
             filename = `${state.currentProject.name}_GDD.json`;
             mimeType = 'application/json';
             break;
@@ -849,6 +1377,260 @@ function exportAs(format) {
     URL.revokeObjectURL(url);
 
     showToast(`Exported as ${format.toUpperCase()}!`, 'success');
+}
+
+// ===== Import Functions =====
+function triggerImport() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,.md,.html,.htm';
+    input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (file) importProjectFile(file);
+    };
+    input.click();
+}
+
+function importProjectFile(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const content = e.target.result;
+            const ext = file.name.split('.').pop().toLowerCase();
+
+            let result;
+            if (ext === 'json') {
+                result = parseJSONImport(content);
+            } else if (ext === 'md') {
+                result = parseMarkdownImport(content);
+            } else if (ext === 'html' || ext === 'htm') {
+                result = parseHTMLImport(content);
+            } else {
+                showToast('Unsupported file format. Use .json, .md, or .html', 'error');
+                return;
+            }
+
+            if (!result) return;
+
+            // Apply imported data
+            state.currentProject = result.project;
+            state.gddData = result.gdd;
+            if (result.sectionPrompts) state.sectionPrompts = result.sectionPrompts;
+            if (result.diagramHistory) state.diagramHistory = result.diagramHistory;
+            if (result.chatHistory) state.chatHistory = result.chatHistory;
+
+            state.currentProject.updatedAt = new Date().toISOString();
+
+            saveState();
+            renderDocumentSections();
+            navigateTo('gdd');
+
+            const sectionCount = Object.keys(result.gdd).filter(k => result.gdd[k]?.content).length;
+            showToast(`Project "${result.project.name}" imported from ${ext.toUpperCase()}! (${sectionCount} sections)`, 'success');
+        } catch (error) {
+            console.error('Import error:', error);
+            showToast('Failed to import file. Check the file format.', 'error');
+        }
+    };
+    reader.onerror = () => {
+        showToast('Failed to read file.', 'error');
+    };
+    reader.readAsText(file);
+}
+
+function parseJSONImport(content) {
+    const data = JSON.parse(content);
+    if (!data.project || !data.gdd) {
+        showToast('Invalid JSON: missing project or gdd data.', 'error');
+        return null;
+    }
+    return data;
+}
+
+function parseMarkdownImport(mdContent) {
+    const lines = mdContent.split('\n');
+    let projectName = 'Imported Project';
+    let genre = '';
+    let platforms = [];
+    let createdAt = new Date().toISOString();
+    const gddData = {};
+
+    // Extract project name from first H1: "# Name - Game Design Document" or just "# Name"
+    for (let i = 0; i < Math.min(lines.length, 10); i++) {
+        const line = lines[i].trim();
+        if (line.startsWith('# ') && !line.startsWith('## ')) {
+            projectName = line.replace(/^#\s+/, '').replace(/\s*[-\u2013\u2014]\s*Game Design Document$/i, '').trim();
+            break;
+        }
+    }
+
+    // Extract metadata from header area (before first ## or ---)
+    for (let i = 0; i < Math.min(lines.length, 20); i++) {
+        const line = lines[i].trim();
+        const createdMatch = line.match(/^\*\*Created:\*\*\s*(.+)/i);
+        if (createdMatch) {
+            try { createdAt = new Date(createdMatch[1]).toISOString(); } catch (e) { }
+        }
+        const genreMatch = line.match(/^\*\*Genre:\*\*\s*(.+)/i);
+        if (genreMatch) genre = genreMatch[1].trim();
+        const platformMatch = line.match(/^\*\*Platforms?:\*\*\s*(.+)/i);
+        if (platformMatch) platforms = platformMatch[1].split(',').map(p => p.trim());
+    }
+
+    // Build a set of known GDD section titles (lowercase, stripped)
+    const knownSectionTitles = {};
+    GDD_SECTIONS.forEach(s => {
+        knownSectionTitles[normalizeSectionTitle(s.title)] = s.id;
+    });
+
+    // PASS 1: Scan for ## headings that EXACTLY match a known GDD section title
+    // All other ## headings are treated as content within the current section
+    const sectionBoundaries = []; // { lineIndex, sectionId }
+    for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim();
+        if (trimmed.startsWith('## ') && !trimmed.startsWith('### ')) {
+            const heading = trimmed.replace(/^##\s+/, '').trim();
+            const sectionId = isGddSectionHeading(heading, knownSectionTitles);
+            if (sectionId) {
+                sectionBoundaries.push({ lineIndex: i, sectionId });
+            }
+        }
+    }
+
+    // PASS 2: Collect content between boundaries
+    for (let b = 0; b < sectionBoundaries.length; b++) {
+        const startLine = sectionBoundaries[b].lineIndex + 1; // skip the ## heading itself
+        const endLine = b + 1 < sectionBoundaries.length
+            ? sectionBoundaries[b + 1].lineIndex
+            : lines.length;
+
+        const contentLines = lines.slice(startLine, endLine);
+        const content = contentLines.join('\n').trim();
+        if (content) {
+            gddData[sectionBoundaries[b].sectionId] = {
+                content: content,
+                lastUpdated: new Date().toISOString()
+            };
+        }
+    }
+
+    // Fallback: if no ## boundaries found, try splitting by # headings
+    if (sectionBoundaries.length === 0) {
+        let currentSectionId = null;
+        let currentContent = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            const trimmed = lines[i].trim();
+            if (trimmed.startsWith('# ') && !trimmed.startsWith('## ')) {
+                if (currentSectionId) {
+                    gddData[currentSectionId] = {
+                        content: currentContent.join('\n').trim(),
+                        lastUpdated: new Date().toISOString()
+                    };
+                }
+                const heading = trimmed.replace(/^#\s+/, '').trim();
+                const sectionId = isGddSectionHeading(heading, knownSectionTitles);
+                currentSectionId = sectionId || fallbackSectionId(heading);
+                currentContent = [];
+            } else if (currentSectionId) {
+                currentContent.push(lines[i]);
+            }
+        }
+
+        if (currentSectionId && currentContent.length > 0) {
+            gddData[currentSectionId] = {
+                content: currentContent.join('\n').trim(),
+                lastUpdated: new Date().toISOString()
+            };
+        }
+    }
+
+    return {
+        project: {
+            name: projectName,
+            genre: genre || 'Unknown',
+            platforms: platforms.length > 0 ? platforms : ['PC'],
+            createdAt: createdAt,
+            updatedAt: new Date().toISOString()
+        },
+        gdd: gddData
+    };
+}
+
+// Normalize a title for comparison: lowercase, strip emojis/special chars, collapse spaces
+function normalizeSectionTitle(title) {
+    return title.toLowerCase()
+        .replace(/[\u{1F600}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F000}-\u{1FFFF}]/gu, '') // strip emojis
+        .replace(/[^a-z0-9\s&]/g, '') // keep only alphanumeric, spaces, &
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+// Check if a heading exactly matches a known GDD section title
+// Returns section id if match, null otherwise
+function isGddSectionHeading(heading, knownSectionTitles) {
+    const normalized = normalizeSectionTitle(heading);
+
+    // Direct exact match
+    if (knownSectionTitles[normalized]) return knownSectionTitles[normalized];
+
+    // Check if normalized heading exactly equals a known title
+    for (const [title, id] of Object.entries(knownSectionTitles)) {
+        if (normalized === title) return id;
+    }
+
+    // Strict containment: heading must be EXACTLY a known title
+    // (e.g. "Game Overview" matches, but "1️⃣ Game Overview" does NOT)
+    // We allow minor prefix/suffix like "& " or extra spaces
+    for (const [title, id] of Object.entries(knownSectionTitles)) {
+        // The normalized heading must start and end with the title (allow surrounding whitespace)
+        if (normalized === title) return id;
+    }
+
+    return null;
+}
+
+function fallbackSectionId(heading) {
+    return normalizeSectionTitle(heading).replace(/\s+/g, '-').substring(0, 30) || 'custom-' + Date.now();
+}
+
+function parseHTMLImport(htmlContent) {
+    // Extract text content from HTML
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlContent, 'text/html');
+
+    // Try to find a structured body content
+    const body = doc.body;
+    if (!body) {
+        showToast('Invalid HTML file: no body content found.', 'error');
+        return null;
+    }
+
+    // Convert HTML back to rough markdown
+    let markdown = '';
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+
+    while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (node.nodeType === Node.TEXT_NODE) {
+            markdown += node.textContent;
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+            const tag = node.tagName.toLowerCase();
+            if (tag === 'h1') markdown += '\n# ';
+            else if (tag === 'h2') markdown += '\n## ';
+            else if (tag === 'h3') markdown += '\n### ';
+            else if (tag === 'h4') markdown += '\n#### ';
+            else if (tag === 'p') markdown += '\n';
+            else if (tag === 'br') markdown += '\n';
+            else if (tag === 'hr') markdown += '\n---\n';
+            else if (tag === 'li') markdown += '\n- ';
+            else if (tag === 'strong' || tag === 'b') markdown += '**';
+            else if (tag === 'em' || tag === 'i') markdown += '*';
+        }
+    }
+
+    // Parse the extracted markdown
+    return parseMarkdownImport(markdown);
 }
 
 function generateMarkdownExport() {
@@ -1008,7 +1790,9 @@ function saveState() {
         currentProject: state.currentProject,
         gddData: state.gddData,
         selectedModel: state.selectedModel,
-        isDarkTheme: state.isDarkTheme
+        isDarkTheme: state.isDarkTheme,
+        diagramHistory: state.diagramHistory || [],
+        sectionPrompts: state.sectionPrompts || {}
     };
     localStorage.setItem('gdd-studio-state', JSON.stringify(saveData));
 }
@@ -1022,6 +1806,8 @@ function loadState() {
             state.gddData = data.gddData || {};
             state.selectedModel = data.selectedModel || CONFIG.defaultModel;
             state.isDarkTheme = data.isDarkTheme !== false;
+            state.diagramHistory = data.diagramHistory || [];
+            state.sectionPrompts = data.sectionPrompts || {};
         }
     } catch (error) {
         console.error('Failed to load state:', error);
@@ -1045,4 +1831,17 @@ window.generateDiagram = generateDiagram;
 window.updateDiagram = updateDiagram;
 window.exportAs = exportAs;
 window.toggleSidePanel = toggleSidePanel;
-window.toggleSection = function(id) { /* Toggle collapse */ };
+window.toggleSection = function (id) { /* Toggle collapse */ };
+window.togglePromptInput = togglePromptInput;
+window.generateSectionWithPrompt = generateSectionWithPrompt;
+window.clearSectionPrompt = clearSectionPrompt;
+window.saveDiagram = saveDiagram;
+window.loadDiagram = loadDiagram;
+window.deleteDiagram = deleteDiagram;
+window.exportDiagramSVG = exportDiagramSVG;
+window.renderDiagramHistory = renderDiagramHistory;
+window.triggerImport = triggerImport;
+window.importProjectFile = importProjectFile;
+window.addCustomGenreTag = addCustomGenreTag;
+window.removeCustomGenreTag = removeCustomGenreTag;
+window.diagramZoom = diagramZoom;

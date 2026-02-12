@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,6 +10,7 @@
     <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
+
 <body>
     <div class="app-container">
         <!-- Sidebar -->
@@ -19,7 +21,7 @@
                     <span>GDD Studio</span>
                 </div>
             </div>
-            
+
             <nav class="sidebar-nav">
                 <div class="nav-section">
                     <span class="nav-section-title">DOCUMENT</span>
@@ -27,7 +29,7 @@
                         <!-- Dynamically populated -->
                     </ul>
                 </div>
-                
+
                 <div class="nav-section">
                     <span class="nav-section-title">TOOLS</span>
                     <ul class="nav-list">
@@ -41,12 +43,12 @@
                         </li>
                         <li class="nav-item" data-tool="export">
                             <i class="fas fa-file-export"></i>
-                            <span>Export</span>
+                            <span>Export / Import</span>
                         </li>
                     </ul>
                 </div>
             </nav>
-            
+
             <div class="sidebar-footer">
                 <div class="ollama-status" id="ollamaStatus">
                     <span class="status-dot"></span>
@@ -83,7 +85,7 @@
                     <div class="welcome-content">
                         <h1>🎮 Welcome to GDD Studio</h1>
                         <p>AI-powered Game Design Document creation tool</p>
-                        
+
                         <div class="quick-start">
                             <h3>Quick Start</h3>
                             <div class="quick-start-grid">
@@ -97,10 +99,10 @@
                                     <h4>AI Brainstorm</h4>
                                     <p>Develop your ideas</p>
                                 </div>
-                                <div class="quick-start-card" onclick="loadTemplate()">
-                                    <i class="fas fa-file-alt"></i>
-                                    <h4>Start from Template</h4>
-                                    <p>Use a ready-made template</p>
+                                <div class="quick-start-card" onclick="triggerImport()">
+                                    <i class="fas fa-file-import"></i>
+                                    <h4>Import Project</h4>
+                                    <p>Load from JSON backup</p>
                                 </div>
                             </div>
                         </div>
@@ -112,11 +114,13 @@
                     <div class="gdd-header">
                         <input type="text" class="gdd-title-input" id="gddTitle" placeholder="Game Title...">
                         <div class="gdd-meta">
-                            <span class="meta-item"><i class="fas fa-calendar"></i> <span id="lastUpdated">-</span></span>
-                            <span class="meta-item"><i class="fas fa-file-word"></i> <span id="wordCount">0</span> words</span>
+                            <span class="meta-item"><i class="fas fa-calendar"></i> <span
+                                    id="lastUpdated">-</span></span>
+                            <span class="meta-item"><i class="fas fa-file-word"></i> <span id="wordCount">0</span>
+                                words</span>
                         </div>
                     </div>
-                    
+
                     <div class="gdd-sections" id="gddSections">
                         <!-- GDD sections will be rendered here -->
                     </div>
@@ -132,13 +136,15 @@
                             </button>
                         </div>
                     </div>
-                    
+
                     <div class="chat-messages" id="chatMessages">
                         <div class="chat-message assistant">
                             <div class="message-avatar"><i class="fas fa-robot"></i></div>
                             <div class="message-content">
-                                <p>Hello! I'm the GDD Studio AI assistant. I can help you create your game design document.</p>
-                                <p>Tell me about your game idea and I'll automatically generate all the necessary sections:</p>
+                                <p>Hello! I'm the GDD Studio AI assistant. I can help you create your game design
+                                    document.</p>
+                                <p>Tell me about your game idea and I'll automatically generate all the necessary
+                                    sections:</p>
                                 <ul>
                                     <li>📝 Game Overview & Concept</li>
                                     <li>🎮 Gameplay Mechanics</li>
@@ -151,10 +157,11 @@
                             </div>
                         </div>
                     </div>
-                    
+
                     <div class="chat-input-area">
                         <div class="chat-suggestions" id="chatSuggestions">
-                            <button class="suggestion-chip" onclick="useSuggestion('I want to make a roguelike dungeon crawler game')">
+                            <button class="suggestion-chip"
+                                onclick="useSuggestion('I want to make a roguelike dungeon crawler game')">
                                 🗡️ Roguelike Dungeon
                             </button>
                             <button class="suggestion-chip" onclick="useSuggestion('A casual puzzle game for mobile')">
@@ -179,68 +186,154 @@
                         <h2><i class="fas fa-project-diagram"></i> Diagrams</h2>
                         <div class="diagram-actions">
                             <select id="diagramType" class="diagram-select">
-                                <option value="gameloop">Game Loop</option>
-                                <option value="mechanics">Mechanic Relations</option>
-                                <option value="progression">Progression System</option>
-                                <option value="ui-flow">UI Flow</option>
-                                <option value="custom">Custom Diagram</option>
+                                <optgroup label="Game Design">
+                                    <option value="gameloop">🔄 Game Loop</option>
+                                    <option value="mechanics">⚙️ Mechanic Relations</option>
+                                    <option value="progression">📈 Progression System</option>
+                                    <option value="ui-flow">📱 UI Flow</option>
+                                </optgroup>
+                                <optgroup label="Technical">
+                                    <option value="class-diagram">🏗️ Class Diagram</option>
+                                    <option value="state-diagram">🔀 State Diagram</option>
+                                    <option value="er-diagram">🗄️ ER Diagram</option>
+                                    <option value="sequence">📋 Sequence Diagram</option>
+                                </optgroup>
+                                <optgroup label="Planning">
+                                    <option value="mindmap">🧠 Mind Map</option>
+                                    <option value="timeline">📅 Timeline</option>
+                                </optgroup>
+                                <option value="custom">✏️ Custom Diagram</option>
                             </select>
-                            <button class="btn btn-primary" onclick="generateDiagram()">
+                            <button class="btn btn-primary" id="generateDiagramBtn" onclick="generateDiagram()">
                                 <i class="fas fa-magic"></i> Generate
                             </button>
                         </div>
                     </div>
-                    
-                    <div class="diagram-content">
-                        <div class="diagram-preview" id="diagramPreview">
-                            <div class="mermaid" id="mermaidDiagram">
-                                graph TD
-                                    A[Start] --> B{Is it working?}
-                                    B -->|Yes| C[Great!]
-                                    B -->|No| D[Debug]
-                                    D --> A
-                            </div>
+
+                    <!-- Custom Prompt for Diagrams -->
+                    <div class="diagram-prompt-area">
+                        <div class="diagram-prompt-wrapper">
+                            <i class="fas fa-lightbulb diagram-prompt-icon"></i>
+                            <textarea id="diagramCustomPrompt" class="diagram-prompt-input"
+                                placeholder="Describe what to generate or modify... (e.g. 'Add inventory system nodes', 'Add a Pause state between Playing and GameOver', 'Remove the tutorial section')"
+                                rows="2"></textarea>
                         </div>
-                        <div class="diagram-code">
-                            <label>Diagram Code (Mermaid)</label>
-                            <textarea id="diagramCode" placeholder="Write your Mermaid diagram code here...">graph TD
+                    </div>
+
+                    <div class="diagram-content">
+                        <div class="diagram-main-area">
+                            <div class="diagram-preview-wrapper">
+                                <div class="diagram-zoom-controls">
+                                    <button class="btn btn-ghost btn-sm" onclick="diagramZoom('in')" title="Zoom In">
+                                        <i class="fas fa-search-plus"></i>
+                                    </button>
+                                    <button class="btn btn-ghost btn-sm" onclick="diagramZoom('out')" title="Zoom Out">
+                                        <i class="fas fa-search-minus"></i>
+                                    </button>
+                                    <button class="btn btn-ghost btn-sm" onclick="diagramZoom('reset')"
+                                        title="Reset Zoom">
+                                        <i class="fas fa-compress-arrows-alt"></i>
+                                    </button>
+                                    <span class="diagram-zoom-level" id="diagramZoomLevel">100%</span>
+                                </div>
+                                <div class="diagram-preview" id="diagramPreview">
+                                    <div class="mermaid" id="mermaidDiagram">
+                                        graph TD
+                                        A[Start] --> B{Is it working?}
+                                        B -->|Yes| C[Great!]
+                                        B -->|No| D[Debug]
+                                        D --> A
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="diagram-code">
+                                <div class="diagram-code-header">
+                                    <label>Mermaid Code</label>
+                                    <div class="diagram-code-actions">
+                                        <button class="btn btn-ghost btn-sm" onclick="updateDiagram()"
+                                            title="Refresh Preview">
+                                            <i class="fas fa-sync"></i>
+                                        </button>
+                                        <button class="btn btn-ghost btn-sm" onclick="saveDiagram()"
+                                            title="Save Diagram">
+                                            <i class="fas fa-bookmark"></i>
+                                        </button>
+                                        <button class="btn btn-ghost btn-sm" onclick="exportDiagramSVG()"
+                                            title="Export as SVG">
+                                            <i class="fas fa-download"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <textarea id="diagramCode" placeholder="Write your Mermaid diagram code here...">graph TD
     A[Start] --> B{Is it working?}
     B -->|Yes| C[Great!]
     B -->|No| D[Debug]
     D --> A</textarea>
-                            <button class="btn btn-ghost" onclick="updateDiagram()">
-                                <i class="fas fa-sync"></i> Update
-                            </button>
+                            </div>
+                        </div>
+                        <div class="diagram-sidebar">
+                            <div class="diagram-sidebar-header">
+                                <h4><i class="fas fa-history"></i> Saved Diagrams</h4>
+                            </div>
+                            <div class="diagram-history-list" id="diagramHistoryList">
+                                <p class="diagram-history-empty"><i class="fas fa-folder-open"></i> No saved diagrams
+                                    yet</p>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Export Panel -->
+                <!-- Export & Import Panel -->
                 <div class="panel export-panel hidden" id="exportPanel">
                     <div class="export-header">
-                        <h2><i class="fas fa-file-export"></i> Export</h2>
+                        <h2><i class="fas fa-file-export"></i> Export & Import</h2>
                     </div>
-                    
-                    <div class="export-options">
-                        <div class="export-card" onclick="exportAs('markdown')">
-                            <i class="fab fa-markdown"></i>
-                            <h4>Markdown</h4>
-                            <p>Obsidian, Notion compatible</p>
+
+                    <div class="export-import-container">
+                        <!-- Export Section -->
+                        <div class="export-section">
+                            <h3 class="section-label"><i class="fas fa-upload"></i> Export</h3>
+                            <div class="export-options">
+                                <div class="export-card" onclick="exportAs('markdown')">
+                                    <i class="fab fa-markdown"></i>
+                                    <h4>Markdown</h4>
+                                    <p>Obsidian, Notion compatible</p>
+                                </div>
+                                <div class="export-card" onclick="exportAs('html')">
+                                    <i class="fas fa-code"></i>
+                                    <h4>HTML</h4>
+                                    <p>Web preview</p>
+                                </div>
+                                <div class="export-card" onclick="exportAs('pdf')">
+                                    <i class="fas fa-file-pdf"></i>
+                                    <h4>PDF</h4>
+                                    <p>Print ready</p>
+                                </div>
+                                <div class="export-card" onclick="exportAs('json')">
+                                    <i class="fas fa-database"></i>
+                                    <h4>JSON</h4>
+                                    <p>Full backup with all data</p>
+                                </div>
+                            </div>
                         </div>
-                        <div class="export-card" onclick="exportAs('html')">
-                            <i class="fas fa-code"></i>
-                            <h4>HTML</h4>
-                            <p>Web preview</p>
-                        </div>
-                        <div class="export-card" onclick="exportAs('pdf')">
-                            <i class="fas fa-file-pdf"></i>
-                            <h4>PDF</h4>
-                            <p>Print ready</p>
-                        </div>
-                        <div class="export-card" onclick="exportAs('json')">
-                            <i class="fas fa-database"></i>
-                            <h4>JSON</h4>
-                            <p>Backup & migration</p>
+
+                        <!-- Import Section -->
+                        <div class="import-section">
+                            <h3 class="section-label"><i class="fas fa-download"></i> Import</h3>
+                            <div class="import-drop-zone" id="importDropZone">
+                                <div class="import-drop-content">
+                                    <i class="fas fa-cloud-upload-alt"></i>
+                                    <h4>Import GDD Project</h4>
+                                    <p>Drag & drop a file here, or click to browse</p>
+                                    <button class="btn btn-primary" onclick="triggerImport()">
+                                        <i class="fas fa-folder-open"></i> Choose File
+                                    </button>
+                                </div>
+                            </div>
+                            <p class="import-hint">
+                                <i class="fas fa-info-circle"></i>
+                                Supports JSON, Markdown (.md), and HTML files. Your current project will be replaced.
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -280,17 +373,29 @@
                     <input type="text" id="newProjectName" placeholder="Your game's name...">
                 </div>
                 <div class="form-group">
-                    <label>Genre</label>
-                    <select id="newProjectGenre">
-                        <option value="action">Action</option>
-                        <option value="adventure">Adventure</option>
-                        <option value="rpg">RPG</option>
-                        <option value="puzzle">Puzzle</option>
-                        <option value="simulation">Simulation</option>
-                        <option value="strategy">Strategy</option>
-                        <option value="casual">Casual</option>
-                        <option value="horror">Horror</option>
-                    </select>
+                    <label>Genre <span class="form-hint">(select multiple or add custom)</span></label>
+                    <div class="genre-chips" id="genreChips">
+                        <button type="button" class="genre-chip" data-genre="Action">🎯 Action</button>
+                        <button type="button" class="genre-chip" data-genre="Adventure">🗺️ Adventure</button>
+                        <button type="button" class="genre-chip" data-genre="RPG">⚔️ RPG</button>
+                        <button type="button" class="genre-chip" data-genre="Puzzle">🧩 Puzzle</button>
+                        <button type="button" class="genre-chip" data-genre="Simulation">🏗️ Simulation</button>
+                        <button type="button" class="genre-chip" data-genre="Strategy">♟️ Strategy</button>
+                        <button type="button" class="genre-chip" data-genre="Casual">🎲 Casual</button>
+                        <button type="button" class="genre-chip" data-genre="Horror">👻 Horror</button>
+                        <button type="button" class="genre-chip" data-genre="Platformer">🏃 Platformer</button>
+                        <button type="button" class="genre-chip" data-genre="Racing">🏎️ Racing</button>
+                        <button type="button" class="genre-chip" data-genre="Fighting">🥊 Fighting</button>
+                        <button type="button" class="genre-chip" data-genre="Sports">⚽ Sports</button>
+                        <button type="button" class="genre-chip" data-genre="Sandbox">🌍 Sandbox</button>
+                        <button type="button" class="genre-chip" data-genre="Survival">🏕️ Survival</button>
+                        <button type="button" class="genre-chip" data-genre="Shooter">🔫 Shooter</button>
+                        <button type="button" class="genre-chip" data-genre="Stealth">🥷 Stealth</button>
+                    </div>
+                    <div class="genre-custom-input">
+                        <input type="text" id="genreCustomInput" placeholder="Type custom genre and press Enter...">
+                    </div>
+                    <div class="genre-selected-tags" id="genreSelectedTags"></div>
                 </div>
                 <div class="form-group">
                     <label>Short Description</label>
@@ -328,4 +433,5 @@
 
     <script src="app.js"></script>
 </body>
+
 </html>
